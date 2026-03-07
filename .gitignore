@@ -1,0 +1,27 @@
+# ── Sensitive ──────────────────────────────
+.env
+*.env
+
+# ── Logs & trade records ───────────────────
+logs/
+*.log
+*.csv
+
+# ── Python cache ───────────────────────────
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# ── Virtual environments ───────────────────
+venv/
+env/
+.venv/
+
+# ── OS files ───────────────────────────────
+.DS_Store
+Thumbs.db
+
+# ── VSCode local settings ──────────────────
+.vscode/settings.json
