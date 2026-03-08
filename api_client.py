@@ -1,7 +1,6 @@
 """
-api_client.py — Pocket Option async API wrapper
-Fixed connection (no balance verification loop).
-Fetches 2M and 1M candles only.
+api_client.py — Pocket Option API wrapper
+Uses BinaryOptionsToolsV2
 Cross-platform: Windows & macOS
 """
 
@@ -21,40 +20,37 @@ log = logging.getLogger(__name__)
 
 
 class PocketOptionClient:
-    """
-    Thin async wrapper around pocketoptionapi_async.
-    Handles connection, candle fetching and trade placement.
-    """
 
     def __init__(self) -> None:
-        self.client:    Any           = None
-        self.connected: bool          = False
+        self.client:    Any             = None
+        self.connected: bool            = False
         self._balance:  Optional[float] = None
 
     # ─── CONNECTION ───────────────────────────────────────────────────────────
 
     async def connect(self) -> bool:
-        """
-        Connect to Pocket Option.
-        Trusts connect() — no balance-verification loop.
-        Candle fetches confirm session health.
-        """
         try:
-            from pocketoptionapi_async import AsyncPocketOptionClient  # type: ignore
+            from BinaryOptionsToolsV2.pocketoption import PocketOptionAsync  # type: ignore
 
-            self.client = AsyncPocketOptionClient(SSID, IS_DEMO)
-            await self.client.connect()
+            # Increase connection timeout to 60s
+            config = {
+                "connection_initialization_timeout_secs": 60,
+                "timeout_secs": 30,
+                "reconnect_time": 5,
+            }
+
+            self.client = PocketOptionAsync(ssid=SSID, config=config)
+
+            log.info("⏳ Waiting for session to establish (15s)...")
+            await asyncio.sleep(15)
+
             self.connected = True
-            log.info("✅ Connected (async library)")
-            await asyncio.sleep(3)
+            log.info("✅ Connected")
             log.info("✅ Session ready")
             return True
 
         except ImportError:
-            log.error(
-                "❌ pocketoptionapi_async not installed.  "
-                "Run: pip install pocketoptionapi-async"
-            )
+            log.error("❌ BinaryOptionsToolsV2 not installed. Run: pip install binaryoptionstoolsv2")
             return False
         except Exception as exc:
             log.error(f"❌ Connection failed: {exc}")
@@ -62,33 +58,18 @@ class PocketOptionClient:
             return False
 
     async def disconnect(self) -> None:
-        """Gracefully disconnect."""
-        if self.client:
-            try:
-                await self.client.disconnect()
-            except Exception:
-                pass
         self.connected = False
         log.info("🔌 Disconnected")
 
     # ─── BALANCE ──────────────────────────────────────────────────────────────
 
     async def get_balance(self) -> float:
-        """
-        Attempt to fetch balance.
-        Returns cached / 0.0 on failure — does NOT crash the bot.
-        Balance display is cosmetic; trading logic does not depend on it.
-        """
         if not self.connected or self.client is None:
             return self._balance or 0.0
         try:
-            raw = await self.client.get_balance()
-            if isinstance(raw, dict):
-                val = float(raw.get("balance", raw.get("amount", 0)))
-            else:
-                val = float(raw)
-            self._balance = val
-            return val
+            val = await self.client.balance()
+            self._balance = float(val)
+            return self._balance
         except Exception as exc:
             log.debug(f"Balance fetch skipped: {exc}")
             return self._balance or 0.0
@@ -96,20 +77,12 @@ class PocketOptionClient:
     # ─── CANDLES ──────────────────────────────────────────────────────────────
 
     async def get_candles_2m(self, pair: str) -> List[Dict]:
-        """Fetch 2-minute candles."""
         return await self._fetch_candles(pair, TF_2M)
 
     async def get_candles_1m(self, pair: str) -> List[Dict]:
-        """Fetch 1-minute candles."""
         return await self._fetch_candles(pair, TF_1M)
 
-    async def get_all_timeframes(
-        self, pair: str
-    ) -> Dict[str, List[Dict]]:
-        """
-        Fetch both timeframes concurrently.
-        Returns {"2M": [...], "1M": [...]}.
-        """
+    async def get_all_timeframes(self, pair: str) -> Dict[str, List[Dict]]:
         results = await asyncio.gather(
             self.get_candles_2m(pair),
             self.get_candles_1m(pair),
@@ -120,19 +93,15 @@ class PocketOptionClient:
         return {"2M": candles_2m, "1M": candles_1m}
 
     async def _fetch_candles(self, pair: str, tf_sec: int) -> List[Dict]:
-        """
-        Internal: fetch candles for a pair/timeframe.
-        Returns list of OHLCV dicts or empty list on error.
-        """
         if not self.connected or self.client is None:
             return []
         try:
-            raw = await self.client.get_candles(
-                pair, tf_sec, CANDLE_COUNT
+            raw = await asyncio.wait_for(
+                self.client.get_candles(pair, tf_sec, CANDLE_COUNT),
+                timeout=15
             )
             if not raw:
                 return []
-            # Normalize to list of dicts
             normalized = []
             for c in raw:
                 if isinstance(c, dict):
@@ -156,23 +125,19 @@ class PocketOptionClient:
     async def place_trade(
         self,
         pair:      str,
-        direction: str,   # "BUY" or "SELL"
+        direction: str,
         amount:    float,
-        expiry:    int,   # seconds
+        expiry:    int,
     ) -> Optional[str]:
-        """
-        Place a binary options trade.
-        Returns trade_id string or None on failure.
-        direction: "BUY" → "call", "SELL" → "put"
-        """
         if not self.connected or self.client is None:
             log.error("❌ Cannot place trade — not connected")
             return None
 
         action = "call" if direction == "BUY" else "put"
         try:
-            result = await self.client.buy(
-                amount, pair, action, expiry
+            result = await asyncio.wait_for(
+                self.client.buy(amount, pair, action, expiry),
+                timeout=10
             )
             if result:
                 trade_id = str(result) if not isinstance(result, dict) \
@@ -187,18 +152,14 @@ class PocketOptionClient:
             log.error(f"❌ Trade failed {pair} {direction}: {exc}")
             return None
 
-    async def check_trade_result(
-        self, trade_id: str
-    ) -> Optional[Dict[str, Any]]:
-        """
-        Poll for trade outcome.
-        Returns dict with keys: result ("win"/"lose"), profit, balance
-        or None if not yet resolved.
-        """
+    async def check_trade_result(self, trade_id: str) -> Optional[Dict[str, Any]]:
         if not self.connected or self.client is None:
             return None
         try:
-            raw = await self.client.check_win(trade_id)
+            raw = await asyncio.wait_for(
+                self.client.check_win(trade_id),
+                timeout=10
+            )
             if raw is None:
                 return None
             if isinstance(raw, dict):
@@ -207,7 +168,6 @@ class PocketOptionClient:
                     "profit":  float(raw.get("profit", 0)),
                     "balance": float(raw.get("balance", 0)),
                 }
-            # Some library versions return a float (profit)
             profit = float(raw)
             return {
                 "result":  "win" if profit > 0 else "lose",

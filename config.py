@@ -3,11 +3,10 @@ config.py — Pocket Option Wilder Bot
 Cross-platform: Windows & macOS
 """
 
-import os
 from pathlib import Path
 
 # ─── SESSION ──────────────────────────────────────────────────────────────────
-SSID     = os.getenv("PO_SSID", "YOUR_SSID_HERE")   # set env var or paste here
+SSID     = '42["auth",{"session":"2jgq2o7ql6f941redfdii6tqne","isDemo":1,"uid":100817301,"platform":2,"isFastHistory":true,"isOptimized":true}]'
 IS_DEMO  = True                                       # True = demo, False = real
 
 # ─── TIMEFRAMES (seconds) ─────────────────────────────────────────────────────
@@ -29,14 +28,10 @@ STOCH_D      = 3
 STOCH_SMOOTH = 3            # smoothing on %K before %D
 
 # ─── STRATEGY THRESHOLDS ──────────────────────────────────────────────────────
-# 2M  BUY  lock  : RSI > 40,  K crosses D up,   SAR below price
-# 2M  SELL lock  : RSI < 60,  K crosses D down, SAR above price
-# 1M  BUY  entry : RSI > 40,  K crosses D up,   SAR below  (MUST)
-# 1M  SELL entry : RSI > 60,  K crosses D down, SAR above  (MUST)
 RSI_BUY_MIN_2M  = 40.0
 RSI_SELL_MAX_2M = 60.0
 RSI_BUY_MIN_1M  = 40.0
-RSI_SELL_MIN_1M = 60.0      # sell on 1M needs RSI *above* 60
+RSI_SELL_MIN_1M = 60.0
 
 # ─── PAIRS ────────────────────────────────────────────────────────────────────
 PAIRS = [
@@ -52,7 +47,7 @@ PAIRS = [
 ]
 
 # ─── SCAN INTERVAL ────────────────────────────────────────────────────────────
-SCAN_INTERVAL_SEC = 10      # seconds between full pair scans
+SCAN_INTERVAL_SEC = 10
 
 # ─── LOGGING / PATHS ──────────────────────────────────────────────────────────
 BASE_DIR  = Path(__file__).parent
